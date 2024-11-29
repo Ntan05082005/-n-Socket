@@ -20,8 +20,17 @@ def connect_to_server():
     global socket_is_connected
 
     try:
-        
-        sock.connect((socket.gethostname(), 9999))
+        if not ip_default_var.get():
+            ip = ip_var.get()
+        else:
+            ip = socket.gethostname()
+
+        if not port_default_var.get():
+            port = int(port_var.get())
+        else:
+            port = 9999
+
+        sock.connect((ip, port))
         messagebox.showinfo("Connection", "Connected Successfully")
         socket_is_connected = True
         switch_to_action_frame()
