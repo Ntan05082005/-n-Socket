@@ -1,5 +1,6 @@
 import os
 import socket
+import json
 import time
 import threading
 
@@ -23,21 +24,29 @@ def main():
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.bind((socket.gethostname(), 9999))
     sock.listen(5)
+    sock.settimeout(1)
 
-    print("Server is listening for connections...")
+    print("Server is listening for connections...\n")
     try:
         while True:
-            client, addr = sock.accept()
-            print(f"New connection from {addr}")
 
-            # Start a new thread for each client
-            thread = threading.Thread(target=handle_client, args=(client, addr))
-            thread.start()
+            try:
+                client, addr = sock.accept()
+                print(f"New connection from {addr}")
 
-            # Show active thread count
-            print(f"[Active connections] {threading.active_count() - 1}")
+                # Start a new thread for each client
+                thread = threading.Thread(target=handle_client, args=(client, addr))
+                thread.start()
+
+                # Show active thread count
+                print(f"[Active connections] {threading.active_count() - 1}\n")
+
+            except socket.timeout:
+                continue
+
     except KeyboardInterrupt:
-        print("[SERVER] Server shutting down...")
+        print("[SERVER] Server shutting down...\n")
+
     finally:
         sock.close()
 
@@ -56,7 +65,7 @@ def handle_client(client, addr):
                 print("No action received. Closing connection.")
                 break
 
-            if action == "!disconnect":
+            if action == "disconnect":
                 connected = False
                 print(f"Disconnected from {addr}")
 
@@ -70,21 +79,31 @@ def handle_client(client, addr):
                 print("Invalid action received.")
                 client.send(b"Invalid action")
 
+            print("\n")
+
         except Exception as e:
             print(f"Error handling client {addr}: {e}")
             break
 
     client.close()
-    print(f"Connection with {addr} closed.")
+    print(f"\nConnection with {addr} closed.\n")
 
 
 # Handle file uploads
 def handle_upload(client):
     try:
-        file_name = client.recv(100).decode().strip()
-        file_size = int(client.recv(100).decode().strip())
+        metadata = client.recv(1024).decode().strip()
+        metadata = json.loads(metadata) # Convert JSON string to dictionary
 
-        # Change SAVE_DIR when used
+        file_name = metadata["file_name"]
+        file_size = int(metadata["file_size"])
+
+        # if metadata is not received
+        if not file_name or not file_size:
+            raise Exception("Upload", "Metadata not received")
+        else:
+            client.send(b"ACK")
+
         SAVE_DIR = r"C:\Tuyen\Socket\Test Server dir"
         if not os.path.exists(SAVE_DIR):
             os.makedirs(SAVE_DIR)
@@ -103,11 +122,13 @@ def handle_upload(client):
                 received_size += len(data)
 
         print(f"File '{unique_file_name}' received and saved successfully.")
-        client.send(b"Upload complete")
-    except Exception as e:
-        print(f"Error during upload: {e}")
-        client.send(b"Upload failed")
 
+        # Send ACK if file is received successfully
+        client.send(b"ACK")
+
+    except Exception as e:
+        client.send(b"NACK")
+        print(f"Error during upload: {e}")
 
 # Handle file downloads
 def handle_download(client):

@@ -3,16 +3,27 @@ from importlib import simple
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from tkinter import simpledialog
+from tkinter import ttk
 import os
 import socket
+import json
 import time
+
+socket_is_connected = False
+
+# Global variables for progress screen
+progress_screen, progress_bar, progress_label = None, None, None
 
 # Connecting process
 def connect_to_server():
+
+    global socket_is_connected
+
     try:
+        
         sock.connect((socket.gethostname(), 9999))
         messagebox.showinfo("Connection", "Connected Successfully")
-
+        socket_is_connected = True
         switch_to_action_frame()
 
     except:
@@ -23,23 +34,46 @@ def connect_to_server():
 def upload_file():
     # Tkinter's file dialog
     file_name = filedialog.askopenfilename(title = "Select a file to upload").strip()
-    file_size = str(os.path.getsize(file_name))
     if not file_name:
         return # not file_name -> no file is selected
+    file_size = str(os.path.getsize(file_name))
 
+    try:
+        sock.send(b"upload")
     
-    sock.send(b"upload") # Notify the upload action
-    sock.send(file_name.encode())
-    time.sleep(0.01)
-    sock.send(file_size.encode())
-    
-    with open(file_name, "rb") as file:
-        while chunk := file.read(1024):
-            if not chunk:
-                break
-            sock.send(chunk)
+        metadata = json.dumps({
+             "file_name": os.path.basename(file_name),
+             "file_size": file_size
+             })
+
+        sock.send(metadata.encode())
+
+        ack = sock.recv(1024).decode().strip()
+        if ack != "ACK":
+            raise Exception("Upload", f"Server did not acknowledge the upload request")
             
-    messagebox.showinfo("Upload", f"File '{file_name}' uploaded successfully")
+
+        # Progress screen
+        show_progress_screen("Uploading")
+    
+        with open(file_name, "rb") as file:
+            sent_size = 0
+            while chunk := file.read(1024):
+                sock.send(chunk)
+                sent_size += len(chunk)
+                update_progress(sent_size, int(file_size))
+        
+        ack = sock.recv(1024).decode().strip()
+        if ack != "ACK":
+            raise Exception("Upload", f"Upload failed")
+            
+        close_progress_screen()
+
+        messagebox.showinfo("Upload", f"File '{file_name}' uploaded successfully")
+
+    except Exception as e:
+        close_progress_screen()
+        messagebox.showerror("Upload", f"Error during upload: {e}")
 
 # Downloading process
 def download_file():
@@ -63,6 +97,64 @@ def download_file():
 
     messagebox.showinfo("Download", "File downloaded successfully.")
 
+
+def socket_exit():
+    if socket_is_connected:
+        sock.send(b"disconnect")
+        sock.close()
+
+    root.quit()
+
+# Toggle between default and custom IP address and port number
+def toggle_ip():
+    if ip_default_var.get():
+        
+        ip_entry.config(state="disabled")
+        ip_var.set("Local host")
+
+    else:
+        ip_entry.config(state="normal")
+        ip_is_default = False
+        ip_var.set("")
+
+def toggle_port():
+    if port_default_var.get():
+        port_entry.config(state="disabled")
+        port_var.set(str(default_port))
+    else:
+        port_entry.config(state="normal")
+        port_var.set("")
+
+
+def show_progress_screen(action_string):
+    global progress_screen, progress_bar, progress_label
+    progress_screen = tk.Toplevel(root)
+    progress_screen.title(action_string)
+    progress_screen.geometry("300x100")
+    progress_screen.resizable(False, False) # width, height -> fixed size
+    progress_screen.transient(root) # progress_screen -> child of root
+    progress_screen.grab_set() # progress_screen -> modal dialog -> block input to root
+
+    progress_title = tk.Label(progress_screen, text=f"{action_string}, please wait...", font=("Arial", 12))
+    progress_title.pack(pady=10)
+
+    # Progress bar
+    progress_bar = tk.ttk.Progressbar(progress_screen, orient="horizontal", length=200, mode="determinate")
+    progress_bar.pack(pady=10)
+
+    # Progress label
+    progress_label = tk.Label(progress_screen, text="0%", font=("Arial", 10))
+    progress_label.pack()
+
+def update_progress(current, total):
+    percentage = int((current / total) * 100)
+    progress_bar["value"] = percentage
+    progress_label.config(text=f"{percentage}%")
+    progress_screen.update_idletasks() # idletasks is a special event flag -> update progress bar
+
+def close_progress_screen():
+    if progress_screen:
+        progress_screen.destroy()
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
@@ -95,22 +187,81 @@ btn_width = 150
 btn_height = 50
 btnX = windowX / 2 - btn_width / 2
 
+# IP address and port number setup
+
+# Default value
+ip_is_default = True # for local host
+default_port = 9999
+
+# String variables for IP address and port number
+ip_var = tk.StringVar(value="Local host")
+port_var = tk.StringVar(value=str(default_port))
+
+# Boolean variable for checkbox state
+ip_default_var = tk.BooleanVar(value=True)
+port_default_var = tk.BooleanVar(value=True)
+
+# Checkbox to toggle between default and custom IP address and port number
+
+
 # Tkinter's layout
 # Connect frame
-connect_btn = tk.Button(connect_frame, text="Connect to Server", command=connect_to_server)
-connect_btn.place(x=btnX, y=150, width=btn_width, height=btn_height)
+# IP address checkbox
+ip_default_checkbox = tk.Checkbutton(
+    connect_frame,
+    text="Use default (local host)",
+    variable=ip_default_var,
+    command=lambda: toggle_ip(),
+    anchor = "w" # text alignment in widget -> west: center left
+)
+ip_default_checkbox.place(x=btnX + btn_width, y=120, width=btn_width, height=30)
 
-exit_btn = tk.Button(connect_frame, text="Exit", command=root.quit) # Tkinter's root.quit
-exit_btn.place(x=btnX, y=200, width=btn_width, height=btn_height)
+# IP address label
+ip_label = tk.Label(connect_frame, text="Server IP address")
+ip_label.place(x=btnX, y=90, width=btn_width, height=30)
+
+# IP address entry
+ip_entry = tk.Entry(connect_frame, textvariable=ip_var, state="disabled")
+ip_entry.place(x=btnX, y=120, width=btn_width, height=30)
+
+# Port number checkbox
+port_default_checkbox = tk.Checkbutton(
+    connect_frame,
+    text=f"Use default ({str(default_port)})",
+    variable=port_default_var,
+    command=lambda: toggle_port(),
+    anchor = "w" # text alignment in widget -> west: center left
+)
+port_default_checkbox.place(x=btnX + btn_width, y=180, width=btn_width, height=30)
+
+# Port number label
+port_label = tk.Label(connect_frame, text="Server port number")
+port_label.place(x=btnX, y=150, width=btn_width, height=30)
+
+# Port number entry
+port_entry = tk.Entry(connect_frame, textvariable=port_var, state="disabled")
+port_entry.place(x=btnX, y=180, width=btn_width, height=30)
+
+# Connect button
+connect_btn = tk.Button(connect_frame, text="Connect to Server", command=connect_to_server)
+connect_btn.place(x=btnX, y=210, width=btn_width, height=btn_height)
+
+# Exit button
+exit_btn = tk.Button(connect_frame, text="Exit", command=socket_exit) # Tkinter's root.quit
+exit_btn.place(x=btnX, y=260, width=btn_width, height=btn_height)
+
 
 # Action frame
+# Upload button
 upload_btn = tk.Button(action_frame, text="Upload File", command=upload_file)
 upload_btn.place(x=btnX, y=125, width=btn_width, height=btn_height)
 
+# Download button
 download_btn = tk.Button(action_frame, text="Download File", command=download_file)
 download_btn.place(x=btnX, y=175, width=btn_width, height=btn_height)
 
-exit_btn = tk.Button(action_frame, text="Exit", command=root.quit) # Tkinter's root.quit
+# Exit button
+exit_btn = tk.Button(action_frame, text="Exit", command=socket_exit) # Tkinter's root.quit
 exit_btn.place(x=btnX, y=225, width=btn_width, height=btn_height)
 
 # Tkinter's main event loop
