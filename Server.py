@@ -4,7 +4,6 @@ import json
 import time
 import threading
 
-
 # Ensure the filename is unique by appending a counter
 def get_unique_filename(directory, filename):
     root, ext = os.path.splitext(filename)
@@ -29,7 +28,6 @@ def main():
     print("Server is listening for connections...\n")
     try:
         while True:
-
             try:
                 client, addr = sock.accept()
                 print(f"New connection from {addr}")
@@ -75,6 +73,9 @@ def handle_client(client, addr):
             elif action == "download":
                 handle_download(client)
 
+            elif action == "upload_folder":
+                handle_folder_upload(client)
+
             else:
                 print("Invalid action received.")
                 client.send(b"Invalid action")
@@ -93,18 +94,17 @@ def handle_client(client, addr):
 def handle_upload(client):
     try:
         metadata = client.recv(1024).decode().strip()
-        metadata = json.loads(metadata) # Convert JSON string to dictionary
+        metadata = json.loads(metadata)  # Convert JSON string to dictionary
 
         file_name = metadata["file_name"]
         file_size = int(metadata["file_size"])
 
-        # if metadata is not received
         if not file_name or not file_size:
             raise Exception("Upload", "Metadata not received")
         else:
             client.send(b"ACK")
 
-        SAVE_DIR = r"C:\Tuyen\Socket\Test Server dir"
+        SAVE_DIR = r"C:\Users\nguye\PycharmProjects\pythonProject\venv\rec"
         if not os.path.exists(SAVE_DIR):
             os.makedirs(SAVE_DIR)
 
@@ -123,12 +123,45 @@ def handle_upload(client):
 
         print(f"File '{unique_file_name}' received and saved successfully.")
 
-        # Send ACK if file is received successfully
         client.send(b"ACK")
 
     except Exception as e:
         client.send(b"NACK")
         print(f"Error during upload: {e}")
+
+def handle_folder_upload(client):
+    try:
+        folder_path = client.recv(100).decode().strip()
+        num_files = int(client.recv(100).decode().strip())
+
+        SAVE_DIR = r"C:\Users\nguye\PycharmProjects\pythonProject\venv\rec"
+        if not os.path.exists(SAVE_DIR):
+            os.makedirs(SAVE_DIR)
+
+        print(f"Receiving folder: {folder_path} with {num_files} files...")
+
+        for _ in range(num_files):
+            file_name = client.recv(100).decode().strip()
+            file_size = int(client.recv(100).decode().strip())
+            unique_file_name = get_unique_filename(SAVE_DIR, os.path.basename(file_name))
+            save_path = os.path.join(SAVE_DIR, unique_file_name)
+
+            with open(save_path, "wb") as file:
+                received_size = 0
+                while received_size < file_size:
+                    data = client.recv(1024)
+                    if not data:
+                        break
+                    file.write(data)
+                    received_size += len(data)
+
+            print(f"File '{unique_file_name}' received and saved successfully.")
+
+        client.send(b"Folder upload complete")
+    except Exception as e:
+        print(f"Error during folder upload: {e}")
+        cli
+
 
 # Handle file downloads
 def handle_download(client):
