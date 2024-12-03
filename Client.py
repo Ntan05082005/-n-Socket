@@ -8,6 +8,7 @@ import os
 import socket
 import json
 import time
+import threading
 
 socket_is_connected = False
 
@@ -83,6 +84,51 @@ def upload_file():
     except Exception as e:
         close_progress_screen()
         messagebox.showerror("Upload", f"Error during upload: {e}")
+
+
+def upload_single_file(file_path):
+    # Send the file to the server
+    file_size = str(os.path.getsize(file_path))
+    sock.send(file_path.encode())
+    time.sleep(0.01)
+    sock.send(file_size.encode())
+
+    with open(file_path, "rb") as file:
+        while chunk := file.read(1024):
+            if not chunk:
+                break
+            sock.send(chunk)
+
+
+
+# Uploading process (folder upload)
+def upload_folder():
+    folder_path = filedialog.askdirectory(title="Select a folder to upload")
+    if not folder_path:
+        return  # no folder selected
+
+    # Gather all files in the folder, including subdirectories
+    all_files = []
+    for root, dirs, files in os.walk(folder_path):
+        for file in files:
+            all_files.append(os.path.join(root, file))
+
+    if not all_files:
+        messagebox.showwarning("No Files", "No files found in the selected folder.")
+        return
+
+    # Notify the server about the folder upload
+    sock.send(b"upload_folder")
+    sock.send(folder_path.encode())
+    time.sleep(0.01)
+    sock.send(str(len(all_files)).encode())  # Send number of files
+
+    # Upload files sequentially
+    for file in all_files:
+        upload_single_file(file)
+
+    messagebox.showinfo("Upload", "Folder uploaded successfully")
+
 
 # Downloading process
 def download_file():
@@ -269,9 +315,13 @@ upload_btn.place(x=btnX, y=125, width=btn_width, height=btn_height)
 download_btn = tk.Button(action_frame, text="Download File", command=download_file)
 download_btn.place(x=btnX, y=175, width=btn_width, height=btn_height)
 
+#Upload folder button
+upload_folder_btn = tk.Button(action_frame, text="Upload Folder", command=upload_folder)
+upload_folder_btn.place(x=btnX, y=225, width=btn_width, height=btn_height)
+
 # Exit button
 exit_btn = tk.Button(action_frame, text="Exit", command=socket_exit) # Tkinter's root.quit
-exit_btn.place(x=btnX, y=225, width=btn_width, height=btn_height)
+exit_btn.place(x=btnX, y=275, width=btn_width, height=btn_height)
 
 # Tkinter's main event loop
 root.mainloop()
