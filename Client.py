@@ -1,10 +1,13 @@
 # This file will be used for recieving files over socket connection.
+
+# Tkinter GUI
 from importlib import simple
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from tkinter import simpledialog
 from tkinter import ttk
-import os
+
+import os 
 import socket
 import json
 import time
@@ -83,21 +86,35 @@ def upload_file():
 
     except Exception as e:
         close_progress_screen()
-        messagebox.showerror("Upload", f"Error during upload: {e}")
+        messagebox.showerror("Upload", f"Error during file upload: {e}")
 
 
 def upload_single_file(file_path):
-    # Send the file to the server
-    file_size = str(os.path.getsize(file_path))
-    sock.send(file_path.encode())
-    time.sleep(0.01)
-    sock.send(file_size.encode())
+    try:
+        # Send the file to the server
+        metadata = json.dumps({
+            "file_name": os.path.basename(file_path),
+            "file_size": os.path.getsize(file_path)
+        })
 
-    with open(file_path, "rb") as file:
-        while chunk := file.read(1024):
-            if not chunk:
-                break
-            sock.send(chunk)
+        sock.send(metadata.encode())
+
+        ack = sock.recv(1024).decode().strip()
+        if ack != "ACK":
+            raise Exception("Upload", f"Server did not acknowledge the upload request")
+
+        with open(file_path, "rb") as file:
+            while chunk := file.read(1024):
+                if not chunk:
+                    break
+                sock.send(chunk)
+
+        ack = sock.recv(1024).decode().strip()
+        if ack != "ACK":
+            raise Exception("Upload", f"Upload failed")
+
+    except Exception as e:
+        raise Exception("Upload", f"Error during file upload: {e}")
 
 
 
@@ -111,23 +128,56 @@ def upload_folder():
     all_files = []
     for root, dirs, files in os.walk(folder_path):
         for file in files:
+            # Skip desktop.ini files
+            if file.lower() == "desktop.ini":
+                continue
             all_files.append(os.path.join(root, file))
 
     if not all_files:
         messagebox.showwarning("No Files", "No files found in the selected folder.")
         return
 
-    # Notify the server about the folder upload
-    sock.send(b"upload_folder")
-    sock.send(folder_path.encode())
-    time.sleep(0.01)
-    sock.send(str(len(all_files)).encode())  # Send number of files
 
-    # Upload files sequentially
-    for file in all_files:
-        upload_single_file(file)
+    try:
+        # Notify the server about the folder upload
+        sock.send(b"upload_folder")
 
-    messagebox.showinfo("Upload", "Folder uploaded successfully")
+        # Send metadata about the folder info
+        metadata = json.dumps({
+            "folder_path": folder_path,
+            "num_files": len(all_files)
+        })
+
+        sock.send(metadata.encode())
+
+        # ACK handling for server's metadata reception
+        ack = sock.recv(1024).decode().strip()
+        if ack != "ACK":
+            raise Exception("Upload", f"Server did not acknowledge the folder upload request")
+
+        # Progress screen
+        show_progress_screen("Uploading Folder")
+
+        total_size = sum(os.path.getsize(file) for file in all_files)
+        sent_size = 0
+
+        # Upload files sequentially
+        for file in all_files:
+            file_size = os.path.getsize(file)
+            upload_single_file(file)
+            sent_size += file_size
+            update_progress(sent_size, total_size)
+
+        ack = sock.recv(1024).decode().strip()
+        if ack != "ACK":
+            raise Exception("Upload", f"Folder upload failed")
+
+        close_progress_screen()
+        messagebox.showinfo("Upload", "Folder uploaded successfully")
+
+    except Exception as e:
+        close_progress_screen()
+        messagebox.showerror("Upload", f"Error during folder upload: {e}")
 
 
 # Downloading process
@@ -309,19 +359,19 @@ exit_btn.place(x=btnX, y=260, width=btn_width, height=btn_height)
 # Action frame
 # Upload button
 upload_btn = tk.Button(action_frame, text="Upload File", command=upload_file)
-upload_btn.place(x=btnX, y=125, width=btn_width, height=btn_height)
+upload_btn.place(x=btnX, y=100, width=btn_width, height=btn_height)
 
 # Download button
 download_btn = tk.Button(action_frame, text="Download File", command=download_file)
-download_btn.place(x=btnX, y=175, width=btn_width, height=btn_height)
+download_btn.place(x=btnX, y=150, width=btn_width, height=btn_height)
 
 #Upload folder button
 upload_folder_btn = tk.Button(action_frame, text="Upload Folder", command=upload_folder)
-upload_folder_btn.place(x=btnX, y=225, width=btn_width, height=btn_height)
+upload_folder_btn.place(x=btnX, y=200, width=btn_width, height=btn_height)
 
 # Exit button
 exit_btn = tk.Button(action_frame, text="Exit", command=socket_exit) # Tkinter's root.quit
-exit_btn.place(x=btnX, y=275, width=btn_width, height=btn_height)
+exit_btn.place(x=btnX, y=250, width=btn_width, height=btn_height)
 
 # Tkinter's main event loop
 root.mainloop()

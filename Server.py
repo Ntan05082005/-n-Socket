@@ -104,7 +104,7 @@ def handle_upload(client):
         else:
             client.send(b"ACK")
 
-        SAVE_DIR = r"C:\Users\nguye\PycharmProjects\pythonProject\venv\rec"
+        SAVE_DIR = r"C:\Tuyen\Socket\Test Server dir"
         if not os.path.exists(SAVE_DIR):
             os.makedirs(SAVE_DIR)
 
@@ -131,21 +131,54 @@ def handle_upload(client):
 
 def handle_folder_upload(client):
     try:
-        folder_path = client.recv(100).decode().strip()
-        num_files = int(client.recv(100).decode().strip())
+        # Receive metadata
+        metadata = client.recv(1024).decode().strip()
+        metadata = json.loads(metadata)  # Convert JSON string to dictionary
 
-        SAVE_DIR = r"C:\Users\nguye\PycharmProjects\pythonProject\venv\rec"
+        # Extract metadata
+        folder_path = metadata["folder_path"]
+        num_files = int(metadata["num_files"])
+
+        # ACK handling for metadata
+        if not folder_path or not num_files:
+            raise Exception("Folder upload", "Metadata not received")
+        else:
+            client.send(b"ACK")
+
+        # Create dir
+        SAVE_DIR = r"C:\Tuyen\Socket\Test Server dir"
         if not os.path.exists(SAVE_DIR):
             os.makedirs(SAVE_DIR)
 
+        # Create a new folder to store the files
+        folder_name = os.path.basename(folder_path)
+        folder_save_path = os.path.join(SAVE_DIR, folder_name)
+        if not os.path.exists(folder_save_path):
+            os.makedirs(folder_save_path)
+
         print(f"Receiving folder: {folder_path} with {num_files} files...")
 
+        # Receive all files in the folder
         for _ in range(num_files):
-            file_name = client.recv(100).decode().strip()
-            file_size = int(client.recv(100).decode().strip())
-            unique_file_name = get_unique_filename(SAVE_DIR, os.path.basename(file_name))
-            save_path = os.path.join(SAVE_DIR, unique_file_name)
+            # Receive file metadata
+            metadata = client.recv(1024).decode().strip()
+            metadata = json.loads(metadata)  # Convert JSON string to dictionary
 
+            # Extract metadata
+            file_name = metadata["file_name"]
+            file_size = int(metadata["file_size"])
+
+            # ACK handling for file metadata
+            if not file_name or not file_size:
+                raise Exception("Folder upload", "File metadata not received")
+            else:
+                client.send(b"ACK")
+
+            # Ensure a unique file name
+            unique_file_name = get_unique_filename(folder_save_path, os.path.basename(file_name))
+            save_path = os.path.join(folder_save_path, unique_file_name)
+
+            # Receive and save 1 file
             with open(save_path, "wb") as file:
                 received_size = 0
                 while received_size < file_size:
@@ -157,10 +190,14 @@ def handle_folder_upload(client):
 
             print(f"File '{unique_file_name}' received and saved successfully.")
 
-        client.send(b"Folder upload complete")
+            # ACK handling for file uploading completion
+            client.send(b"ACK")
+
+        # ACK handling for folder uploading completion
+        client.send(b"ACK")
     except Exception as e:
+        client.send(b"NACK")
         print(f"Error during folder upload: {e}")
-        cli
 
 
 # Handle file downloads
